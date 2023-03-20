@@ -42,6 +42,11 @@ export default class FlexAsIframePlugin extends FlexPlugin {
         // status "created" is used to indicate call is getting connected
         sendActiveCallStatus("created");
 
+        reservation.task.setAttributes({
+          ...reservation.task.attributes,
+          status: "created",
+        });
+
         CALL_STATUS.forEach((status) => {
           reservation.on(status, (payload: any) => {
             payload.task.setAttributes({
@@ -120,3 +125,9 @@ export default class FlexAsIframePlugin extends FlexPlugin {
     flex.Actions.replaceAction("HangupCall", hangupCallCallback);
   }
 }
+
+// await manager.store.getState().flex.worker.tasks.forEach((task) => {
+//   console.log("-----task", task);
+//   const pastAttributes = task.attributes;
+//   task.setAttributes({ ...pastAttributes, name: "it worked" });
+// });
