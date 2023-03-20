@@ -47,8 +47,6 @@ export default class FlexAsIframePlugin extends FlexPlugin {
             payload.task.setAttributes({
               ...payload.task.attributes,
               status: status,
-              lpNamespace: "lp-xxx-yyy-zz",
-              referenceIdentifier: "1234567890",
             });
             console.log(">>> inside flex plugin onStatusChange event: ", { status, payload });
             sendActiveCallStatus(status);
