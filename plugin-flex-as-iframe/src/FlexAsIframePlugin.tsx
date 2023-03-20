@@ -5,7 +5,7 @@ const PLUGIN_NAME = "FlexAsIframePlugin";
 const TASK_CHANNEL = {
   VOICE: "voice",
 };
-const CALL_STATUS = ["accepted", "canceled", "rejected", "rescinded", "timeout"];
+const CALL_STATUS = ["accepted", "canceled", "completed", "rejected", "rescinded", "timeout", "wrapup"];
 
 export default class FlexAsIframePlugin extends FlexPlugin {
   constructor() {
@@ -31,29 +31,26 @@ export default class FlexAsIframePlugin extends FlexPlugin {
       };
 
       const afterSetActivityCallback = (payload: any) => {
-        let data = {
-          visibility: payload.activityName,
-        };
-
-        sendMessageToCRM("afterSetActivity", data);
+        sendMessageToCRM("afterSetActivity", { visibility: payload.activityName });
       };
 
       const sendActiveCallStatus = (status: string) => {
-        let data = {
-          status,
-        };
-
-        sendMessageToCRM("reservationCreated", data);
+        sendMessageToCRM("reservationCreated", { status });
       };
 
       const reservationCreatedCallback = (reservation: any) => {
         // status "created" is used to indicate call is getting connected
-        console.log(">>> inside flex-ui reservationCreatedCallback: ", { reservation });
         sendActiveCallStatus("created");
 
         CALL_STATUS.forEach((status) => {
           reservation.on(status, (payload: any) => {
-            console.log(">>> inside flex-ui onStatusChange event: ", { status, payload });
+            payload.task.setAttributes({
+              ...payload.task.attributes,
+              status: status,
+              lpNamespace: "lp-xxx-yyy-zz",
+              referenceIdentifier: "1234567890",
+            });
+            console.log(">>> inside flex plugin onStatusChange event: ", { status, payload });
             sendActiveCallStatus(status);
           });
         });
@@ -65,18 +62,15 @@ export default class FlexAsIframePlugin extends FlexPlugin {
 
       const receiveMessage = (event: any) => {
         let { name, payload = null } = event.data;
-
-        // invoke the action requested by crm
+        console.log(">>> inside flex plugin invokeAction", name);
         flex.Actions.invokeAction(name, payload);
       };
 
       const voiceConnectedHandler = (connection: any) => {
         connection.on("disconnect", (disConnection: any) => {
-          console.log(">>> inside flex-ui disconnect event: ", disConnection);
-
+          console.log(">>> inside flex plugin disconnect event: ", disConnection);
           const { parameters } = disConnection;
           const { CallSid } = parameters;
-          // do what you want here
         });
       };
 
@@ -89,17 +83,19 @@ export default class FlexAsIframePlugin extends FlexPlugin {
       flex.Actions.addListener("afterToggleMute", afterToggleMuteCallback);
 
       manager.events.addListener("pluginsInitialized", pluginsInitializedCallback);
+      manager.events.addListener("connectionStateChanged", (payload: any) => {});
+      manager.events.addListener("flexError", (error: any) => {});
+
       manager.workerClient && manager.workerClient.on("reservationCreated", reservationCreatedCallback);
     }
 
     const acceptTaskCallback = (payload: any, original: any) => {
-      console.log(">>> inside flex-ui acceptTaskCallback: ", payload);
+      console.log(">>> inside flex plugin acceptTaskCallback: ", payload);
       return new Promise<void>((resolve, reject) => {
         if (payload.task.taskChannelUniqueName === TASK_CHANNEL.VOICE) {
           let data = {
             ...payload.task.attributes,
           };
-
           sendMessageToCRM("voice", data);
         }
         resolve();
@@ -107,11 +103,9 @@ export default class FlexAsIframePlugin extends FlexPlugin {
     };
 
     const hangupCallCallback = (payload: any, original: any) => {
+      console.log(">>> inside flex plugin hangupCallCallback: ", payload);
       return new Promise<void>((resolve, reject) => {
         //for outbound calls, to will be undefined
-        console.log(">>> inside flex-ui hangupCallCallback: ", payload);
-        console.log(">>> inside flex-ui manager object: ", manager);
-
         let data = {
           taskSid: payload.task.taskSid,
           workerSid: payload.task.workerSid,
@@ -120,7 +114,6 @@ export default class FlexAsIframePlugin extends FlexPlugin {
           agent: manager.user.identity,
         };
         sendMessageToCRM("hangupCall", data);
-
         resolve();
       }).then(() => original(payload));
     };
