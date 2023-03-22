@@ -1,11 +1,11 @@
 import * as Flex from "@twilio/flex-ui";
 import { FlexPlugin } from "@twilio/flex-plugin";
+import { registerFlexEvents } from "./FlexEvents";
+import { registerActionExtensions } from "./Actions";
+import { registerVoiceClientExtensions } from "./VoiceClient";
+import { registerWorkClientExtensions } from "./WorkClient";
 
 const PLUGIN_NAME = "FlexAsIframePlugin";
-const TASK_CHANNEL = {
-  VOICE: "voice",
-};
-const CALL_STATUS = ["accepted", "canceled", "completed", "rejected", "rescinded", "timeout", "wrapup"];
 
 export default class FlexAsIframePlugin extends FlexPlugin {
   constructor() {
@@ -13,116 +13,24 @@ export default class FlexAsIframePlugin extends FlexPlugin {
   }
 
   async init(flex: typeof Flex, manager: Flex.Manager): Promise<void> {
-    const sendMessageToCRM = (eventName: string, payload?: any) => {
-      let data = {
-        eventName,
-        payload,
-      };
+    // run below code only if flex ui is opened inside iframe
+    if (window.self === window.top) return;
+    flex.AgentDesktopView.defaultProps.showPanel2 = false;
 
-      parent.postMessage(JSON.stringify(data), "*");
-      console.log(">>> sending post message to crm: ", data);
+    const invokeAction = (event: any) => {
+      let actionName = event.data.name;
+      let payload = event.data.payload;
+
+      console.log(">>> inside flex plugin invoking action: ", actionName);
+      flex.Actions.invokeAction(actionName, payload);
     };
 
-    if (window.self !== window.top) {
-      flex.AgentDesktopView.defaultProps.showPanel2 = false;
+    window.addEventListener("message", invokeAction);
 
-      const pluginsInitializedCallback = () => {
-        sendMessageToCRM("pluginsInitialized");
-      };
-
-      const afterSetActivityCallback = (payload: any) => {
-        sendMessageToCRM("afterSetActivity", { visibility: payload.activityName });
-      };
-
-      const sendActiveCallStatus = (status: string) => {
-        sendMessageToCRM("reservationCreated", { status });
-      };
-
-      const reservationCreatedCallback = (reservation: any) => {
-        // status "created" is used to indicate call is getting connected
-        sendActiveCallStatus("created");
-
-        reservation.task.setAttributes({
-          ...reservation.task.attributes,
-          status: "created",
-        });
-
-        CALL_STATUS.forEach((status) => {
-          reservation.on(status, (payload: any) => {
-            payload.task.setAttributes({
-              ...payload.task.attributes,
-              status: status,
-            });
-            console.log(">>> inside flex plugin onStatusChange event: ", { status, payload });
-            sendActiveCallStatus(status);
-          });
-        });
-      };
-
-      const afterToggleMuteCallback = () => {
-        sendMessageToCRM("toggleMute");
-      };
-
-      const receiveMessage = (event: any) => {
-        let { name, payload = null } = event.data;
-        console.log(">>> inside flex plugin invokeAction", name);
-        flex.Actions.invokeAction(name, payload);
-      };
-
-      const voiceConnectedHandler = (connection: any) => {
-        connection.on("disconnect", (disConnection: any) => {
-          console.log(">>> inside flex plugin disconnect event: ", disConnection);
-          const { parameters } = disConnection;
-          const { CallSid } = parameters;
-        });
-      };
-
-      const { voiceClient } = manager;
-      voiceClient.on("incoming", voiceConnectedHandler);
-
-      window.addEventListener("message", receiveMessage);
-
-      flex.Actions.addListener("afterSetActivity", afterSetActivityCallback);
-      flex.Actions.addListener("afterToggleMute", afterToggleMuteCallback);
-
-      manager.events.addListener("pluginsInitialized", pluginsInitializedCallback);
-      manager.events.addListener("connectionStateChanged", (payload: any) => {});
-      manager.events.addListener("flexError", (error: any) => {});
-
-      manager.workerClient && manager.workerClient.on("reservationCreated", reservationCreatedCallback);
-    }
-
-    const acceptTaskCallback = (payload: any, original: any) => {
-      console.log(">>> inside flex plugin acceptTaskCallback: ", payload);
-      return new Promise<void>((resolve, reject) => {
-        if (payload.task.taskChannelUniqueName === TASK_CHANNEL.VOICE) {
-          let data = {
-            ...payload.task.attributes,
-          };
-          sendMessageToCRM("voice", data);
-        }
-        resolve();
-      }).then(() => original(payload));
-    };
-
-    const hangupCallCallback = (payload: any, original: any) => {
-      console.log(">>> inside flex plugin hangupCallCallback: ", payload);
-      return new Promise<void>((resolve, reject) => {
-        //for outbound calls, to will be undefined
-        let data = {
-          taskSid: payload.task.taskSid,
-          workerSid: payload.task.workerSid,
-          ...payload.task.attributes,
-          duration: payload.task.age,
-          agent: manager.user.identity,
-        };
-        sendMessageToCRM("hangupCall", data);
-        resolve();
-      }).then(() => original(payload));
-    };
-
-    flex.Actions.replaceAction("AcceptTask", acceptTaskCallback);
-    flex.Actions.replaceAction("HangupCall", hangupCallCallback);
+    registerFlexEvents(manager);
+    registerActionExtensions(manager);
+    registerVoiceClientExtensions(manager);
+    registerWorkClientExtensions(manager);
   }
 }
 
@@ -131,3 +39,6 @@ export default class FlexAsIframePlugin extends FlexPlugin {
 //   const pastAttributes = task.attributes;
 //   task.setAttributes({ ...pastAttributes, name: "it worked" });
 // });
+
+// import { StateHelper } from "@twilio/flex-ui";
+// const activeCall = StateHelper.getCurrentPhoneCallState();
